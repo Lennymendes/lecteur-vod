@@ -1,0 +1,7 @@
+[package]
+name = "hls-playlist"
+version = "0.1.0"
+edition = "2021"
+description = "Analyse de playlists HLS Twitch, détection des pubs SSAI, filtre live à numérotation stable. Zéro dépendance."
+
+[dependencies]

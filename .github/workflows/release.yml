@@ -1,0 +1,41 @@
+name: Build (manuel)
+# Construit l'application COMPLÈTE avec libmpv. Lancer à la main : Actions → Build → Run workflow.
+on: workflow_dispatch
+
+jobs:
+  bundle:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-latest,   target: aarch64-apple-darwin }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with: { targets: "${{ matrix.target }}" }
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: libmpv (macOS)
+        if: runner.os == 'macOS'
+        run: brew install mpv
+      - name: libmpv (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          # Archive « mpv-dev » de shinchiro (mpv.lib à générer depuis libmpv-2.dll via lib.exe) :
+          # étapes détaillées dans docs/BUILD.md. À adapter à votre source de binaires libmpv.
+          Write-Host "Voir docs/BUILD.md (libmpv Windows)"
+      - run: npm install
+      - run: npm --prefix ui install
+      - name: Sidecars
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then pwsh scripts/fetch-sidecars.ps1; else scripts/fetch-sidecars.sh ${{ matrix.target }}; fi
+      - run: npx tauri build --target ${{ matrix.target }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aurex-${{ matrix.target }}
+          path: target/${{ matrix.target }}/release/bundle/**/*

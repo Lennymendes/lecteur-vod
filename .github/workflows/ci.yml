@@ -1,0 +1,63 @@
+name: CI
+on:
+  push: { branches: [main] }
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # 1) Cœur audio / HLS / YouTube natif : tests sur les 3 OS (compile CoreAudio et WASAPI pour de vrai).
+  core:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: ffmpeg (tests d'intégration réels)
+        shell: bash
+        run: |
+          case "$RUNNER_OS" in
+            macOS)   brew install ffmpeg ;;
+            Windows) choco install ffmpeg -y --no-progress ;;
+            Linux)   sudo apt-get update && sudo apt-get install -y ffmpeg ;;
+          esac
+      - run: cargo test -p audio-core -p audio-engine -p hls-playlist -p hls-guard -p yt-native
+
+  # 2) Plugin DSP d'exemple en C et C++ : l'ABI est chargée pour de vrai.
+  dsp-abi:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          gcc -shared -fPIC -Iinclude examples/dsp-plugin/tap_only_plugin.c -o /tmp/tap.so
+          g++ -shared -fPIC -std=c++17 -Iinclude examples/dsp-plugin/gain_plugin.cpp -o /tmp/gain.so
+          ls -l /tmp/*.so
+
+  # 3) Shell Tauri + UI. Sans libmpv (--no-default-features) : vérifie que tout compile sur les OS cibles.
+  shell:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: ui/package.json }
+      - run: npm --prefix ui install
+      - run: npm --prefix ui run build
+      - name: Sidecars factices (externalBin exige que les fichiers existent à la compilation)
+        shell: bash
+        run: |
+          T=$(rustc -vV | sed -n 's/^host: //p'); E=""; [[ "$T" == *windows* ]] && E=".exe"
+          for n in yt-dlp ffmpeg; do : > "src-tauri/binaries/$n-$T$E"; done
+      - run: cargo check -p aurex --no-default-features
+      - run: cargo clippy -p aurex --no-default-features -- -D warnings
+        continue-on-error: true

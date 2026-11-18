@@ -1,0 +1,7 @@
+[package]
+name = "audio-core"
+version = "0.1.0"
+edition = "2021"
+description = "Logique audio pure, sans dépendance : formats, conversion float->entier, choix de fréquence, ring buffer SPSC."
+
+[dependencies]

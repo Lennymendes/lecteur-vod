@@ -1,0 +1,8 @@
+[workspace]
+resolver = "2"
+members = ["crates/audio-core", "crates/audio-engine", "crates/hls-playlist", "crates/hls-guard", "crates/yt-native", "src-tauri"]
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+panic = "abort"

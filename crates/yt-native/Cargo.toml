@@ -1,0 +1,17 @@
+[package]
+name = "yt-native"
+version = "0.1.0"
+edition = "2021"
+description = "Moteur YouTube natif : extraction (sidecar yt-dlp), décodage (sidecar ffmpeg) vers audio-engine, SponsorBlock, synchro A/V."
+
+[features]
+default = ["net"]
+# Réseau + JSON : extraction yt-dlp et API SponsorBlock. Désactivable pour tester la logique pure.
+net = ["dep:reqwest", "dep:serde", "dep:serde_json", "dep:sha2"]
+
+[dependencies]
+audio-engine = { path = "../audio-engine" }
+serde = { version = "1", features = ["derive"], optional = true }
+serde_json = { version = "1", optional = true }
+sha2 = { version = "0.10", optional = true }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls", "json"], optional = true }

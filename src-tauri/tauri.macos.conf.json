@@ -1,0 +1,20 @@
+{
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Aurex",
+        "width": 1280,
+        "height": 760,
+        "minWidth": 900,
+        "minHeight": 560,
+        "decorations": true,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "transparent": true,
+        "resizable": true,
+        "center": true
+      }
+    ]
+  }
+}
