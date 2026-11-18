@@ -25,7 +25,7 @@ jobs:
       - name: libmpv + ffmpeg (macOS)
         if: runner.os == 'macOS'
         run: |
-          brew install mpv ffmpeg
+          brew install mpv ffmpeg molten-vk
           echo "LIBRARY_PATH=$(brew --prefix)/lib" >> "$GITHUB_ENV"
           echo "PKG_CONFIG_PATH=$(brew --prefix)/lib/pkgconfig" >> "$GITHUB_ENV"
 
@@ -68,6 +68,13 @@ jobs:
             -d "$APP/Contents/Frameworks" -p "@executable_path/../Frameworks/"
           # dylibbundler duplique des LC_RPATH (dans l'exe ET dans les dylibs) : dyld refuse alors de charger.
           python3 scripts/fix-macos-rpaths.py "$APP"
+          # MoltenVK (Vulkan→Metal) : mpv 0.4x sur macOS n'a que des contextes Vulkan ; sans pilote → pas d'image.
+          cp -L "$(brew --prefix molten-vk)/lib/libMoltenVK.dylib" "$APP/Contents/Frameworks/libMoltenVK.dylib"
+          mkdir -p "$APP/Contents/Resources/vulkan"
+          cat > "$APP/Contents/Resources/vulkan/MoltenVK_icd.json" <<'JSON'
+          {"file_format_version":"1.0.0","ICD":{"library_path":"../../Frameworks/libMoltenVK.dylib","api_version":"1.2.0"}}
+          JSON
+          ls -l "$APP/Contents/Frameworks" | grep -iE "vulkan|MoltenVK"
           # Re-signature ad hoc (install_name_tool invalide les signatures), dylibs d'abord.
           find "$APP/Contents/Frameworks" -name '*.dylib' -type f -exec codesign --force --sign - {} \;
           codesign --force --sign - "$APP/Contents/MacOS/ffmpeg"

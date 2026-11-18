@@ -19,7 +19,26 @@ use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::Manager;
 
+/// macOS : indique au chargeur Vulkan le pilote MoltenVK embarqué dans le bundle (avant toute init de mpv).
+fn setup_vulkan_icd() {
+    if !cfg!(target_os = "macos") {
+        return;
+    }
+    if let Some(icd) = std::env::current_exe()
+        .ok()
+        .and_then(|e| e.parent().map(|d| d.join("../Resources/vulkan/MoltenVK_icd.json")))
+        .filter(|p| p.exists())
+    {
+        std::env::set_var("VK_DRIVER_FILES", &icd);
+        std::env::set_var("VK_ICD_FILENAMES", &icd);
+        log::log(format!("vulkan: ICD = {}", icd.display()));
+    } else {
+        log::log("vulkan: ICD MoltenVK introuvable dans le bundle");
+    }
+}
+
 pub fn run() {
+    setup_vulkan_icd();
     tauri::Builder::default()
         .manage(AppState::default())
         .invoke_handler(tauri::generate_handler![
