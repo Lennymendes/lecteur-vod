@@ -66,7 +66,18 @@ jobs:
           mkdir -p "$APP/Contents/Frameworks"
           dylibbundler -od -b -cd -x "$APP/Contents/MacOS/aurex" -x "$APP/Contents/MacOS/ffmpeg" \
             -d "$APP/Contents/Frameworks" -p "@executable_path/../Frameworks/"
+          # dylibbundler peut ajouter un LC_RPATH déjà présent : dyld refuse les doublons.
+          for f in "$APP/Contents/MacOS/aurex" "$APP/Contents/MacOS/ffmpeg"; do
+            n=$(otool -l "$f" | grep -c "path @executable_path/../Frameworks/ (" || true)
+            while [ "$n" -gt 1 ]; do install_name_tool -delete_rpath "@executable_path/../Frameworks/" "$f"; n=$((n-1)); done
+            echo "$f : $(otool -l "$f" | grep -c 'path @executable_path/../Frameworks/ (') rpath"
+          done
           codesign --force --deep --sign - "$APP"
+          # Vérifie que dyld charge bien tout (sans écran, l'app échouera plus tard, mais pas sur dyld).
+          OUT=$( (timeout 10 "$APP/Contents/MacOS/aurex" 2>&1 || true) | head -30 )
+          echo "$OUT"
+          if echo "$OUT" | grep -qE "Library not loaded|duplicate LC_RPATH|dyld\["; then echo "ERREUR dyld"; exit 1; fi
+          "$APP/Contents/MacOS/ffmpeg" -version | head -1
           ditto -c -k --keepParent "$APP" Aurex-macos-arm64.zip
           otool -L "$APP/Contents/MacOS/aurex" | head -20
       - uses: actions/upload-artifact@v4
