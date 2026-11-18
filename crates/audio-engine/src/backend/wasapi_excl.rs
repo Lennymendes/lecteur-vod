@@ -58,7 +58,7 @@ fn setup(want: StreamFormat) -> Result<Ready, AudioError> {
         let fmt = WaveFormat::new(store, valid, &SampleType::Int, want.rate as usize, channels, None);
         let (def_period, min_period) = {
             let c = device.get_iaudioclient().map_err(|e| AudioError::Os(e.to_string()))?;
-            c.get_device_period().map_err(|e| AudioError::Os(e.to_string()))?
+            c.get_periods().map_err(|e| AudioError::Os(e.to_string()))?
         };
         for period in [def_period, def_period * 2, min_period.max(100_000), 200_000] {
             // Un IAudioClient ne s'initialise qu'une fois : nouveau client à chaque tentative.
@@ -102,7 +102,7 @@ fn run(want: StreamFormat, ring: Arc<Ring>, shared: Arc<Shared>, stop: Arc<Atomi
 
     // Le tampon exclusif doit être rempli (silence) avant Start.
     bytes.iter_mut().for_each(|b| *b = 0);
-    if render.write_to_device(buffer_frames, block_align, &bytes, None).is_err() || client.start_stream().is_err() {
+    if render.write_to_device(buffer_frames, &bytes, None).is_err() || client.start_stream().is_err() {
         let _ = tx.send(Err(AudioError::Os("start_stream".into())));
         return;
     }
@@ -123,7 +123,7 @@ fn run(want: StreamFormat, ring: Arc<Ring>, shared: Arc<Shared>, stop: Arc<Atomi
             }
         };
         rc.render(&mut bytes[..frames * block_align]);
-        if render.write_to_device(frames, block_align, &bytes[..frames * block_align], None).is_err() {
+        if render.write_to_device(frames, &bytes[..frames * block_align], None).is_err() {
             shared.device_lost.store(true, Ordering::Relaxed);
             break;
         }
