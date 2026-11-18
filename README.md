@@ -20,5 +20,5 @@ Voir [`docs/BUILD.md`](docs/BUILD.md). En bref : `npm run setup`, `scripts/fetch
 * L'extraction YouTube native contrevient aux CGU de YouTube (choix assumé).
 
 ## Tester les installeurs (CI)
-* **macOS** : `brew install mpv ffmpeg` (l'app dépend des dylibs Homebrew), puis ouvrir l'`.app` (non signée : clic droit → Ouvrir).
+* **macOS** : `brew install mpv ffmpeg` (l'app dépend des dylibs Homebrew), puis `xattr -cr Aurex.app && codesign --force --deep --sign - Aurex.app` (app non notarisée : sinon macOS la dit « endommagée »), puis l'ouvrir.
 * **Windows** : installeur `.exe`/`.msi` (libmpv-2.dll embarquée).
