@@ -43,6 +43,10 @@ jobs:
           Get-ChildItem libmpv
           7z x (Get-ChildItem libmpv\mpv-dev-x86_64-*.7z | Select-Object -First 1).FullName -olibmpv -y | Out-Null
           Get-ChildItem libmpv -Recurse | Select-Object -First 40 FullName
+          # Pas de .def fourni : on le génère à partir des exports de la DLL, puis on crée mpv.lib.
+          $names = dumpbin /exports libmpv\libmpv-2.dll | ForEach-Object { if ($_ -match '^\s+\d+\s+[0-9A-F]+\s+[0-9A-F]{8}\s+(\S+)') { $Matches[1] } }
+          ("LIBRARY libmpv-2.dll", "EXPORTS") + $names | Set-Content libmpv\mpv.def -Encoding ascii
+          "exports : $($names.Count)"
           lib /def:libmpv\mpv.def /name:libmpv-2.dll /out:libmpv\mpv.lib /machine:x64
           Copy-Item libmpv\libmpv-2.dll src-tauri\binaries\libmpv-2.dll
           "LIB=$env:LIB;$PWD\libmpv" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
