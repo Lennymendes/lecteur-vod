@@ -66,17 +66,17 @@ jobs:
           mkdir -p "$APP/Contents/Frameworks"
           dylibbundler -od -b -cd -x "$APP/Contents/MacOS/aurex" -x "$APP/Contents/MacOS/ffmpeg" \
             -d "$APP/Contents/Frameworks" -p "@executable_path/../Frameworks/"
-          # dylibbundler peut ajouter un LC_RPATH déjà présent : dyld refuse les doublons.
-          for f in "$APP/Contents/MacOS/aurex" "$APP/Contents/MacOS/ffmpeg"; do
-            n=$(otool -l "$f" | grep -c "path @executable_path/../Frameworks/ (" || true)
-            while [ "$n" -gt 1 ]; do install_name_tool -delete_rpath "@executable_path/../Frameworks/" "$f"; n=$((n-1)); done
-            echo "$f : $(otool -l "$f" | grep -c 'path @executable_path/../Frameworks/ (') rpath"
-          done
+          # dylibbundler duplique des LC_RPATH (dans l'exe ET dans les dylibs) : dyld refuse alors de charger.
+          python3 scripts/fix-macos-rpaths.py "$APP"
+          # Re-signature ad hoc (install_name_tool invalide les signatures), dylibs d'abord.
+          find "$APP/Contents/Frameworks" -name '*.dylib' -type f -exec codesign --force --sign - {} \;
+          codesign --force --sign - "$APP/Contents/MacOS/ffmpeg"
           codesign --force --deep --sign - "$APP"
-          # Vérifie que dyld charge bien tout (sans écran, l'app échouera plus tard, mais pas sur dyld).
-          OUT=$( (timeout 10 "$APP/Contents/MacOS/aurex" 2>&1 || true) | head -30 )
-          echo "$OUT"
-          if echo "$OUT" | grep -qE "Library not loaded|duplicate LC_RPATH|dyld\["; then echo "ERREUR dyld"; exit 1; fi
+          # Vrai test dyld : lance l'app 8 s (pas de `timeout` sous macOS) et cherche une erreur de chargement.
+          "$APP/Contents/MacOS/aurex" > /tmp/aurex-launch.log 2>&1 & PID=$!
+          sleep 8; kill $PID 2>/dev/null || true
+          echo "--- sortie du lancement ---"; head -30 /tmp/aurex-launch.log
+          if grep -qE "Library not loaded|duplicate LC_RPATH|dyld\[" /tmp/aurex-launch.log; then echo "ERREUR dyld"; exit 1; fi
           "$APP/Contents/MacOS/ffmpeg" -version | head -1
           ditto -c -k --keepParent "$APP" Aurex-macos-arm64.zip
           otool -L "$APP/Contents/MacOS/aurex" | head -20
