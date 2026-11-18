@@ -8,6 +8,8 @@ use objc2_app_kit::{NSView, NSWindowOrderingMode};
 use objc2_foundation::{MainThreadMarker, NSPoint, NSRect, NSSize};
 use raw_window_handle::RawWindowHandle;
 
+static CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
 pub struct Surface {
     view: usize,
     content: usize,
@@ -26,6 +28,8 @@ impl Surface {
             let frame = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(16.0, 16.0));
             let view: Retained<NSView> = NSView::initWithFrame(mtm.alloc::<NSView>(), frame);
             content.addSubview_positioned_relativeTo(&view, NSWindowOrderingMode::NSWindowBelow, None);
+            let f = content.frame();
+            crate::log::log(format!("mac: vue contenu {}x{}, sous-vues={}", f.size.width, f.size.height, content.subviews().len()));
             Ok(Surface { view: Retained::into_raw(view) as usize, content: h.ns_view.as_ptr() as usize })
         }
     }
@@ -42,6 +46,10 @@ impl Surface {
             let ch = content.frame().size.height;
             view.setFrame(NSRect::new(NSPoint::new(x, ch - y - h), NSSize::new(w.max(1.0), h.max(1.0))));
             view.setHidden(w < 2.0 || h < 2.0);
+            let n = CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            if n < 15 || n % 50 == 0 {
+                crate::log::log(format!("mac: set_rect #{n} css=({x:.0},{y:.0},{w:.0},{h:.0}) contenu_h={ch:.0} masquée={} sous-vues vue={}", w < 2.0 || h < 2.0, view.subviews().len()));
+            }
         }
     }
 }

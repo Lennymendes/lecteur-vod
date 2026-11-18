@@ -20,6 +20,8 @@ impl Video {
             if wid != 0 {
                 init.set_property("wid", wid)?;
             }
+            init.set_property("log-file", crate::log::dir().join("mpv.log").to_string_lossy().as_ref())?;
+            init.set_property("msg-level", "all=v")?;
             init.set_property("vo", "gpu")?;
             init.set_property("hwdec", "auto-safe")?;
             init.set_property("osc", "no")?;

@@ -6,6 +6,7 @@
 
 mod commands;
 mod events;
+mod log;
 mod sidecar;
 mod state;
 mod surface;
@@ -44,13 +45,20 @@ pub fn run() {
                 Ok(h) => match surface::Surface::create(h.as_raw()) {
                     Ok(s) => {
                         let wid = s.wid();
+                        log::log(format!("surface créée, wid={wid:#x}"));
                         *st.surface.lock().unwrap() = Some(s);
                         match video::Video::new(wid) {
                             Ok(v) => *st.video.lock().unwrap() = Some(Arc::new(v)),
-                            Err(e) => eprintln!("[aurex] vidéo indisponible : {e}"),
+                            Err(e) => {
+                                log::log(format!("vidéo indisponible : {e}"));
+                                eprintln!("[aurex] vidéo indisponible : {e}")
+                            }
                         }
                     }
-                    Err(e) => eprintln!("[aurex] surface vidéo indisponible : {e}"),
+                    Err(e) => {
+                        log::log(format!("surface indisponible : {e}"));
+                        eprintln!("[aurex] surface vidéo indisponible : {e}")
+                    }
                 },
                 Err(e) => eprintln!("[aurex] handle de fenêtre : {e}"),
             }
