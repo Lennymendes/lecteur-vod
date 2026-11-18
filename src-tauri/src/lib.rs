@@ -36,6 +36,7 @@ pub fn run() {
             commands::dsp_set_bypass,
             commands::video_set_rect,
             commands::app_info,
+            commands::export_logs,
         ])
         .setup(|app| {
             // Thread principal : création de la surface native sous la webview, puis de libmpv dessus.

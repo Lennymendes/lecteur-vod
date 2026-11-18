@@ -22,6 +22,8 @@ export function Toggles({ dspInstalled }: { dspInstalled: boolean }) {
       <Switch label="Anti-pub Twitch" hint="Contourne les pubs SSAI (playlist HLS nettoyée en local)" on={ad} onChange={(v) => { setAd(v); api.setAdblock(v).catch(() => {}); }} />
       <Switch label="SponsorBlock" hint="Saute les segments sponsor / intro / outro (YouTube)" on={sb} onChange={(v) => { setSb(v); api.setSponsorblock(v).catch(() => {}); }} />
       <Switch label="Contourner le DSP" hint="Laisse passer le signal sans traitement (bit-perfect)" on={bypass} onChange={(v) => { setBypass(v); api.dspBypass(v).catch(() => {}); }} />
+      <button className="logs" onClick={() => api.exportLogs().then((p) => setMsg(`Journaux exportés : ${p}`)).catch((e) => setMsg(String(e)))}>Exporter les journaux</button>
+      {msg && <div className="hint">{msg}</div>}
       <details className="dsp">
         <summary>Plugin DSP (C/C++)</summary>
         <div className="dsp-row">
@@ -29,7 +31,6 @@ export function Toggles({ dspInstalled }: { dspInstalled: boolean }) {
           <button onClick={() => api.dspLoad(plugin).then(() => setMsg("Chargé — actif au prochain titre")).catch((e) => setMsg(String(e)))}>Charger</button>
           <button className="ghost" disabled={!dspInstalled} onClick={() => api.dspUnload().then(() => setMsg("Déchargé")).catch((e) => setMsg(String(e)))}>Retirer</button>
         </div>
-        {msg && <div className="hint">{msg}</div>}
       </details>
     </div>
   );

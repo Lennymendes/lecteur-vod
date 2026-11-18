@@ -18,6 +18,7 @@ export interface Notice { kind: string; text: string; from: number | null; to: n
 
 export const api = {
   info: () => invoke<AppInfo>("app_info"),
+  exportLogs: () => invoke<string>("export_logs"),
   ytPlay: (url: string, start = 0) => invoke<PlayInfo>("yt_play", { url, start }),
   twitchPlay: (channel: string, quality = "best") => invoke<PlayInfo>("twitch_play", { channel, quality }),
   pause: (paused: boolean) => invoke<void>("player_pause", { paused }),

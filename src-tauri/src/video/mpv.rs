@@ -21,8 +21,14 @@ impl Video {
                 init.set_property("wid", wid)?;
             }
             init.set_property("log-file", crate::log::dir().join("mpv.log").to_string_lossy().as_ref())?;
-            init.set_property("msg-level", "all=v")?;
+            init.set_property("msg-level", "all=warn,cplayer=v,vo=v,ao=v")?;
             init.set_property("vo", "gpu")?;
+            // macOS : le contexte « auto » n'essaie que Vulkan (MoltenVK, non embarqué → VK_ERROR_INCOMPATIBLE_DRIVER).
+            // On force OpenGL via Cocoa, fourni par libmpv lui-même.
+            if cfg!(target_os = "macos") {
+                init.set_property("gpu-api", "opengl")?;
+                init.set_property("gpu-context", "cocoa")?;
+            }
             init.set_property("hwdec", "auto-safe")?;
             init.set_property("osc", "no")?;
             init.set_property("input-default-bindings", "no")?;

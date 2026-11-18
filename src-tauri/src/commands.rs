@@ -51,6 +51,35 @@ pub fn app_info(state: State<'_, AppState>) -> AppInfo {
     }
 }
 
+/// Rassemble les journaux utiles dans un seul fichier sur le Bureau et renvoie son chemin.
+#[tauri::command]
+pub fn export_logs(state: State<'_, AppState>) -> Result<String, String> {
+    let dir = crate::log::dir();
+    let read = |n: &str| std::fs::read_to_string(dir.join(n)).unwrap_or_default();
+    let mpv: Vec<String> = read("mpv.log")
+        .lines()
+        .filter(|l| !l.contains("[curl]") && !l.contains("Run command") && !l.contains("lua"))
+        .map(String::from)
+        .collect();
+    let keep = mpv.len().saturating_sub(400);
+    let info = app_info(state);
+    let out = format!(
+        "# Aurex {} — {}\nlibmpv={} surface_video={} yt-dlp={} ffmpeg={}\n\n## aurex.log (fin)\n{}\n\n## mpv.log (filtré, fin)\n{}\n",
+        env!("CARGO_PKG_VERSION"),
+        info.os,
+        info.libmpv,
+        info.video_surface,
+        info.yt_dlp,
+        info.ffmpeg,
+        read("aurex.log").lines().rev().take(200).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join("\n"),
+        mpv[keep..].join("\n"),
+    );
+    let home = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")).map_err(|e| e.to_string())?;
+    let path = std::path::PathBuf::from(home).join("Desktop").join("Aurex-logs.txt");
+    std::fs::write(&path, out).map_err(|e| e.to_string())?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
 // ───────────────────────────── YouTube natif ─────────────────────────────
 
 #[tauri::command]
