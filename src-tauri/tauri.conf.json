@@ -41,7 +41,7 @@
     ],
     "externalBin": [
       "binaries/yt-dlp",
-      "binaries/ffmpeg"
+      "binaries/ffmpeg", "binaries/deno"
     ],
     "macOS": {
       "signingIdentity": "-"

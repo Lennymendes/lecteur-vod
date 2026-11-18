@@ -3,10 +3,21 @@
 //! ⚠ À valider (Spike 1) sur Apple Silicon et Intel. libmpv (`wid` = NSView*) ajoute sa propre
 //! sous-vue DANS notre conteneur : l'ordre Z global reste « vidéo sous webview ».
 
+use objc2::encode::{Encoding, RefEncode};
 use objc2::rc::Retained;
-use objc2_app_kit::{NSView, NSWindowOrderingMode};
+use objc2::runtime::AnyObject;
+use objc2::msg_send;
+use objc2_app_kit::{NSColor, NSView, NSWindowOrderingMode};
 use objc2_foundation::{MainThreadMarker, NSPoint, NSRect, NSSize};
 use raw_window_handle::RawWindowHandle;
+
+#[repr(C)]
+struct CGColor {
+    _p: [u8; 0],
+}
+unsafe impl RefEncode for CGColor {
+    const ENCODING_REF: Encoding = Encoding::Pointer(&Encoding::Struct("CGColor", &[]));
+}
 
 static CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
@@ -27,6 +38,14 @@ impl Surface {
             let mtm = MainThreadMarker::new_unchecked(); // appelé depuis `setup` (thread principal)
             let frame = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(16.0, 16.0));
             let view: Retained<NSView> = NSView::initWithFrame(mtm.alloc::<NSView>(), frame);
+            // Fond noir opaque : les bandes autour de la vidéo (letterbox) ne laissent plus voir le bureau.
+            view.setWantsLayer(true);
+            let layer: *mut AnyObject = msg_send![&*view, layer];
+            if !layer.is_null() {
+                let black = NSColor::blackColor();
+                let cg: *const CGColor = msg_send![&*black, CGColor];
+                let _: () = msg_send![layer, setBackgroundColor: cg];
+            }
             content.addSubview_positioned_relativeTo(&view, NSWindowOrderingMode::NSWindowBelow, None);
             let f = content.frame();
             crate::log::log(format!("mac: vue contenu {}x{}, sous-vues={}", f.size.width, f.size.height, content.subviews().len()));

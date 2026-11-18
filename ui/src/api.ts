@@ -5,7 +5,19 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 export type Source = "youtube" | "twitch" | "idle";
 
 export interface AppInfo { os: string; libmpv: boolean; videoSurface: boolean; ytDlp: boolean; ffmpeg: boolean }
-export interface PlayInfo { title: string; duration: number | null; route: "native" | "mpv"; video: boolean }
+export interface PlayInfo { title: string; duration: number | null; route: "native" | "mpv" | "external"; video: boolean }
+
+export type Player = "aurex" | "vlc" | "mpv" | "iina" | "custom";
+export interface Settings { twitchQuality: string; ytMaxHeight: number; player: Player; customCmd: string }
+export interface External { player: Exclude<Player, "aurex">; custom: string | null }
+
+const SETTINGS_KEY = "aurex.settings";
+export const DEFAULT_SETTINGS: Settings = { twitchQuality: "best", ytMaxHeight: 1080, player: "aurex", customCmd: "" };
+export function loadSettings(): Settings {
+  try { return { ...DEFAULT_SETTINGS, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? "{}") }; } catch { return DEFAULT_SETTINGS; }
+}
+export function saveSettings(s: Settings) { try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); } catch { /* stockage indisponible */ } }
+export const externalOf = (s: Settings): External | null => (s.player === "aurex" ? null : { player: s.player, custom: s.player === "custom" ? s.customCmd : null });
 export interface AudioBadge {
   path: "engine" | "mpv";
   sourceRate: number; sourceChannels: number;
@@ -19,8 +31,8 @@ export interface Notice { kind: string; text: string; from: number | null; to: n
 export const api = {
   info: () => invoke<AppInfo>("app_info"),
   exportLogs: () => invoke<string>("export_logs"),
-  ytPlay: (url: string, start = 0) => invoke<PlayInfo>("yt_play", { url, start }),
-  twitchPlay: (channel: string, quality = "best") => invoke<PlayInfo>("twitch_play", { channel, quality }),
+  ytPlay: (url: string, maxHeight: number, external: External | null, start = 0) => invoke<PlayInfo>("yt_play", { url, start, maxHeight, external }),
+  twitchPlay: (channel: string, quality: string, external: External | null) => invoke<PlayInfo>("twitch_play", { channel, quality, external }),
   pause: (paused: boolean) => invoke<void>("player_pause", { paused }),
   seek: (secs: number) => invoke<void>("player_seek", { secs }),
   stop: () => invoke<void>("player_stop"),

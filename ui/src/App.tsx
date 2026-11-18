@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, AppInfo, AudioBadge, events, fmtTime, Notice, PlayInfo, Source, Tick } from "./api";
+import { api, AppInfo, AudioBadge, events, externalOf, fmtTime, loadSettings, Notice, PlayInfo, saveSettings, Settings, Source, Tick } from "./api";
+import { SettingsPanel } from "./components/Settings";
 import { Controls } from "./components/Controls";
 import { SourcePane } from "./components/SourcePane";
 import { StatusBadge } from "./components/StatusBadge";
@@ -25,6 +26,10 @@ export default function App() {
   const [errors, setErrors] = useState<Record<Tab, string | null>>({ twitch: null, youtube: null });
   const [notice, setNotice] = useState<Notice | null>(null);
   const noticeTimer = useRef<number>();
+  const [settings, setSettingsState] = useState<Settings>(loadSettings);
+  const [showSettings, setShowSettings] = useState(false);
+  const last = useRef<Record<Tab, string | null>>({ twitch: null, youtube: null });
+  const setSettings = (s: Settings) => { setSettingsState(s); saveSettings(s); };
 
   useEffect(() => { api.info().then(setInfo).catch(() => {}); }, []);
 
@@ -45,12 +50,14 @@ export default function App() {
 
   const playing: Source = tick?.source ?? "idle";
 
-  const play = useCallback(async (t: Tab, value: string) => {
+  const play = useCallback(async (t: Tab, value: string, s: Settings) => {
+    last.current[t] = value;
     setBusy(t);
     setErrors((e) => ({ ...e, [t]: null }));
     setBadge(null);
     try {
-      const r = t === "twitch" ? await api.twitchPlay(value) : await api.ytPlay(value);
+      const ext = externalOf(s);
+      const r = t === "twitch" ? await api.twitchPlay(value, s.twitchQuality, ext) : await api.ytPlay(value, s.ytMaxHeight, ext);
       setNow(r);
     } catch (e) {
       setErrors((x) => ({ ...x, [t]: String(e) }));
@@ -66,11 +73,19 @@ export default function App() {
     </div>
   );
 
+  // Changer la qualité relance le flux en cours de cette source.
+  const changeQuality = (t: Tab, q: string) => {
+    const s = t === "twitch" ? { ...settings, twitchQuality: q } : { ...settings, ytMaxHeight: Number(q) };
+    setSettings(s);
+    if (playing === t && last.current[t]) play(t, last.current[t]!, s);
+  };
+  const extPlaceholder = (t: Tab) => (now?.route === "external" && last.current[t] && now.title ? `▶ ${now.title}` : undefined);
+
   const missing = info && (!info.libmpv || !info.ytDlp || !info.ffmpeg);
 
   return (
     <div className="app">
-      <TitleBar tab={tab} onTab={setTab} playing={playing} os={info?.os ?? ""} />
+      <TitleBar tab={tab} onTab={setTab} playing={playing} os={info?.os ?? ""} onSettings={() => setShowSettings(true)} />
       {missing && (
         <div className="banner">
           {!info!.libmpv && "libmpv non compilé : pas de vidéo. "}
@@ -81,21 +96,26 @@ export default function App() {
       <main className="main">
         <SourcePane
           kind="twitch" active={tab === "twitch"} slotVisible={playing === "twitch"} busy={busy === "twitch"}
-          onPlay={(v) => play("twitch", v)} error={errors.twitch} notice={noticeNode}
+          onPlay={(v) => play("twitch", v, settings)} error={errors.twitch} notice={noticeNode}
+          quality={settings.twitchQuality} onQuality={(q) => changeQuality("twitch", q)} placeholder={extPlaceholder("twitch")}
         />
         <SourcePane
           kind="youtube" active={tab === "youtube"} slotVisible={playing === "youtube" && now?.video !== false} busy={busy === "youtube"}
-          onPlay={(v) => play("youtube", v)} error={errors.youtube} notice={noticeNode}
+          onPlay={(v) => play("youtube", v, settings)} error={errors.youtube} notice={noticeNode}
+          quality={String(settings.ytMaxHeight)} onQuality={(q) => changeQuality("youtube", q)} placeholder={extPlaceholder("youtube")}
         />
       </main>
       <footer className="dock">
         <div className="now">
-          <div className="title">{tick?.title ?? "Rien en lecture"}</div>
+          <div className="title">{tick?.title ?? (now?.route === "external" ? now.title : "Rien en lecture")}</div>
           <StatusBadge b={badge} underruns={tick?.underruns ?? 0} />
         </div>
         <Controls tick={tick} />
-        <Toggles dspInstalled={badge?.dspInstalled ?? false} />
+        <Toggles />
       </footer>
+      {showSettings && (
+        <SettingsPanel s={settings} onChange={setSettings} onClose={() => setShowSettings(false)} os={info?.os ?? ""} dspInstalled={badge?.dspInstalled ?? false} />
+      )}
     </div>
   );
 }

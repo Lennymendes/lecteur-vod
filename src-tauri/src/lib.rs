@@ -6,6 +6,7 @@
 
 mod commands;
 mod events;
+mod external;
 mod log;
 mod sidecar;
 mod state;

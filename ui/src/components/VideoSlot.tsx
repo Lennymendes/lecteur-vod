@@ -33,5 +33,5 @@ export function VideoSlot({ visible, children }: { visible: boolean; children?: 
     };
   }, [visible]);
 
-  return <div ref={ref} className="video-slot">{children}</div>;
+  return <div ref={ref} className={`video-slot ${visible ? "" : "off"}`}>{children}</div>;
 }

@@ -85,6 +85,10 @@ jobs:
           echo "--- sortie du lancement ---"; head -30 /tmp/aurex-launch.log
           if grep -qE "Library not loaded|duplicate LC_RPATH|dyld\[" /tmp/aurex-launch.log; then echo "ERREUR dyld"; exit 1; fi
           "$APP/Contents/MacOS/ffmpeg" -version | head -1
+          # Test YouTube réel (yt-dlp + Deno embarqués). Non bloquant : les IP de GitHub sont souvent filtrées par YouTube.
+          "$APP/Contents/MacOS/yt-dlp" --js-runtimes "deno:$APP/Contents/MacOS/deno" -J --skip-download "https://www.youtube.com/watch?v=jNQXAC9IVRw" 2>/tmp/ytdlp.err \
+            | python3 -c "import json,sys; d=json.load(sys.stdin); f=d['formats']; print('yt-dlp OK :', d['title'], '-', sum(1 for x in f if x.get('acodec') not in (None,'none') and x.get('vcodec') in (None,'none')), 'formats audio')" \
+            || { echo "yt-dlp KO (non bloquant)"; tail -5 /tmp/ytdlp.err; }
           ditto -c -k --keepParent "$APP" Aurex-macos-arm64.zip
           otool -L "$APP/Contents/MacOS/aurex" | head -20
       - uses: actions/upload-artifact@v4

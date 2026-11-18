@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Télécharge yt-dlp et ffmpeg dans src-tauri/binaries/ au format Tauri externalBin : <nom>-<triplet>[.exe]
+# Télécharge yt-dlp, ffmpeg et deno dans src-tauri/binaries/ au format Tauri externalBin : <nom>-<triplet>[.exe]
 # Usage : scripts/fetch-sidecars.sh [triplet]   (défaut : celui de rustc)
 set -euo pipefail
 cd "$(dirname "$0")/../src-tauri/binaries"
@@ -36,5 +36,10 @@ case "$TRIPLE" in
     tar -xf "$tmp/ff.tar.xz" -C "$tmp"; mv "$tmp"/ffmpeg-*/ffmpeg "ffmpeg-$TRIPLE" ;;
 esac
 chmod +x ffmpeg-$TRIPLE$EXT
+
+# Deno : moteur JavaScript exigé par yt-dlp pour les vidéos YouTube (défis « n »/signature) depuis 2025.11.
+echo "→ deno ($TRIPLE)"
+curl -fL "https://github.com/denoland/deno/releases/latest/download/deno-$TRIPLE.zip" -o "$tmp/deno.zip"
+unzip -o -q "$tmp/deno.zip" -d "$tmp/deno"; mv "$tmp/deno/deno$EXT" "deno-$TRIPLE$EXT"; chmod +x "deno-$TRIPLE$EXT"
 rm -rf "$tmp"
 ls -lh .

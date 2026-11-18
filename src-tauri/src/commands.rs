@@ -83,28 +83,55 @@ pub fn export_logs(state: State<'_, AppState>) -> Result<String, String> {
 // ───────────────────────────── YouTube natif ─────────────────────────────
 
 #[tauri::command]
-pub async fn yt_play(app: AppHandle, url: String, start: Option<f64>) -> Result<PlayInfo, String> {
-    let r = tauri::async_runtime::spawn_blocking(move || yt_play_blocking(app, url, start.unwrap_or(0.0)))
+pub async fn yt_play(
+    app: AppHandle,
+    url: String,
+    start: Option<f64>,
+    max_height: Option<u32>,
+    external: Option<crate::external::External>,
+) -> Result<PlayInfo, String> {
+    crate::log::log(format!("yt_play: {url} (max {max_height:?}, externe {:?})", external.as_ref().map(|e| &e.player)));
+    let r = tauri::async_runtime::spawn_blocking(move || yt_play_blocking(app, url, start.unwrap_or(0.0), max_height.unwrap_or(1080), external))
         .await
         .map_err(|e| e.to_string())?;
+    if let Err(e) = &r {
+        crate::log::log(format!("yt_play: ERREUR {e}"));
+    }
     r
+}
+
+/// yt-dlp a besoin d'un moteur JavaScript (Deno, embarqué) pour les vidéos YouTube depuis fin 2025.
+fn yt_dlp() -> YtDlp {
+    let deno = sidecar::path("deno");
+    let extra_args = if deno.exists() { vec!["--js-runtimes".into(), format!("deno:{}", deno.display())] } else { vec![] };
+    crate::log::log(format!("yt-dlp: {} | deno: {}", sidecar::path("yt-dlp").display(), if deno.exists() { deno.display().to_string() } else { "absent".into() }));
+    YtDlp { path: sidecar::path("yt-dlp"), extra_args }
 }
 
 fn user_agent(h: &yt_native::format::Headers) -> Option<String> {
     h.0.iter().find(|(k, _)| k.eq_ignore_ascii_case("user-agent")).map(|(_, v)| v.clone())
 }
 
-fn yt_play_blocking(app: AppHandle, input: String, start: f64) -> Result<PlayInfo, String> {
+fn yt_play_blocking(app: AppHandle, input: String, start: f64, max_height: u32, external: Option<crate::external::External>) -> Result<PlayInfo, String> {
     let st = app.state::<AppState>();
     let id = video_id(&input).ok_or("URL ou identifiant YouTube invalide")?;
 
-    let dlp = YtDlp { path: sidecar::path("yt-dlp"), extra_args: vec![] };
-    let resolved = dlp.resolve(&id).map_err(|e| format!("extraction : {e}"))?;
-    let pol = Policy::default();
+    let resolved = yt_dlp().resolve(&id).map_err(|e| format!("extraction : {e}"))?;
+    let pol = Policy { max_height, ..Policy::default() };
     let route = choose_route(&resolved, &pol).ok_or("aucun format audio exploitable (flux protégé ou indisponible)")?;
+    crate::log::log(format!("yt: « {} » live={} audio={} vidéo={}", resolved.title, resolved.is_live, resolved.audio.len(), resolved.video.len()));
 
     // Libère le DAC / arrête mpv AVANT d'ouvrir quoi que ce soit.
     st.stop_all(true);
+
+    if let Some(ext) = external {
+        let name = match &route {
+            Route::MpvFallback { url } => crate::external::launch(&ext, url, None, &resolved.title)?,
+            Route::Native { audio, video: Some(v) } => crate::external::launch(&ext, &v.url, Some(&audio.url), &resolved.title)?,
+            Route::Native { audio, video: None } => crate::external::launch(&ext, &audio.url, None, &resolved.title)?,
+        };
+        return Ok(PlayInfo { title: format!("{} — dans {name}", resolved.title), duration: resolved.duration, route: "external", video: false });
+    }
     let gen = st.generation.load(Ordering::SeqCst);
     let video = st.video();
 
@@ -165,7 +192,12 @@ fn yt_play_blocking(app: AppHandle, input: String, start: f64) -> Result<PlayInf
 // ───────────────────────────── Twitch ─────────────────────────────
 
 #[tauri::command]
-pub async fn twitch_play(app: AppHandle, channel: String, quality: Option<String>) -> Result<PlayInfo, String> {
+pub async fn twitch_play(
+    app: AppHandle,
+    channel: String,
+    quality: Option<String>,
+    external: Option<crate::external::External>,
+) -> Result<PlayInfo, String> {
     let channel = channel.trim().trim_start_matches('#').to_lowercase();
     if channel.is_empty() || !channel.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
         return Err("nom de chaîne invalide".into());
@@ -177,7 +209,10 @@ pub async fn twitch_play(app: AppHandle, channel: String, quality: Option<String
 
     let st = app.state::<AppState>();
     let gen = st.generation.load(Ordering::SeqCst);
-    let video = st.video().ok_or("libmpv indisponible : Twitch nécessite le lecteur vidéo")?;
+    let video = st.video();
+    if video.is_none() && external.is_none() {
+        return Err("libmpv indisponible : Twitch nécessite le lecteur vidéo".into());
+    }
 
     let proxy = st.proxy.get_or_try_init(|| async { hls_guard::spawn_proxy().await }).await.map_err(|e| format!("proxy local : {e}"))?;
     let tw = TwitchHls::new(None).map_err(|e| e.to_string())?;
@@ -185,8 +220,15 @@ pub async fn twitch_play(app: AppHandle, channel: String, quality: Option<String
     let (url, mut events) = proxy.serve(&channel, guard).await;
     proxy.set_enabled(&channel, st.adblock.load(Ordering::SeqCst)).await;
 
-    video.load_live(&url, None)?;
     *st.current.lock().unwrap() = Current::Twitch(TwitchSession { channel: channel.clone(), paused: false });
+    let external_name = match (&external, &video) {
+        (Some(ext), _) => Some(crate::external::launch(ext, &url, None, &channel)?),
+        (None, Some(v)) => {
+            v.load_live(&url, None)?;
+            None
+        }
+        (None, None) => unreachable!(),
+    };
 
     // Événements anti-pub -> UI.
     {
@@ -208,6 +250,10 @@ pub async fn twitch_play(app: AppHandle, channel: String, quality: Option<String
                 let _ = app.emit(EV_NOTICE, n);
             }
         });
+    }
+    if let Some(name) = external_name {
+        // Le proxy anti-pub reste actif tant qu'Aurex tourne : le lecteur externe le lit en local.
+        return Ok(PlayInfo { title: format!("{channel} — dans {name} (anti-pub actif)"), duration: None, route: "external", video: false });
     }
     spawn_ticker(app.clone(), gen);
     spawn_mpv_audio_probe(app.clone(), gen);

@@ -12,4 +12,8 @@ New-Item -ItemType Directory $tmp | Out-Null
 Invoke-WebRequest "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-lgpl.zip" -OutFile "$tmp\ff.zip"
 Expand-Archive "$tmp\ff.zip" -DestinationPath $tmp
 Copy-Item (Get-ChildItem "$tmp\ffmpeg-*\bin\ffmpeg.exe").FullName (Join-Path $dir "ffmpeg-$triple.exe")
+Write-Host "-> deno ($triple)"
+Invoke-WebRequest "https://github.com/denoland/deno/releases/latest/download/deno-$triple.zip" -OutFile "$tmp\deno.zip"
+Expand-Archive "$tmp\deno.zip" -DestinationPath "$tmp\deno"
+Copy-Item "$tmp\deno\deno.exe" (Join-Path $dir "deno-$triple.exe")
 Get-ChildItem $dir
