@@ -20,7 +20,11 @@ chmod +x "yt-dlp-$TRIPLE$EXT"
 echo "→ ffmpeg ($TRIPLE)"
 tmp="$(mktemp -d)"
 case "$TRIPLE" in
-  aarch64-apple-darwin|x86_64-apple-darwin)
+  aarch64-apple-darwin)
+    # Apple Silicon : ffmpeg natif arm64 de Homebrew (`brew install ffmpeg`). Non portable (dylibs Homebrew) : OK pour tester sur CETTE machine.
+    command -v brew >/dev/null || { echo "installez Homebrew puis : brew install ffmpeg" >&2; exit 1; }
+    cp "$(brew --prefix)/bin/ffmpeg" "ffmpeg-$TRIPLE" ;;
+  x86_64-apple-darwin)
     # Builds statiques de evermeet.cx (x86_64, tourne via Rosetta sur Apple Silicon). Remplacez par votre build ARM si besoin.
     curl -fL "https://evermeet.cx/ffmpeg/get/zip" -o "$tmp/ff.zip"
     unzip -o -q "$tmp/ff.zip" -d "$tmp"; mv "$tmp/ffmpeg" "ffmpeg-$TRIPLE" ;;

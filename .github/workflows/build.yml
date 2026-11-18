@@ -1,0 +1,65 @@
+name: Build (installeurs de test)
+# Construit l'application COMPLÈTE (avec libmpv) pour macOS Apple Silicon et Windows x64.
+# Téléchargez les artefacts dans l'onglet Actions → run → Artifacts.
+on:
+  push: { branches: [main] }
+  workflow_dispatch:
+
+jobs:
+  bundle:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-latest, target: aarch64-apple-darwin }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with: { targets: "${{ matrix.target }}" }
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+
+      - name: libmpv + ffmpeg (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install mpv ffmpeg
+          echo "LIBRARY_PATH=$(brew --prefix)/lib" >> "$GITHUB_ENV"
+          echo "PKG_CONFIG_PATH=$(brew --prefix)/lib/pkgconfig" >> "$GITHUB_ENV"
+
+      - name: Outils MSVC (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: libmpv (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          New-Item -ItemType Directory -Force libmpv | Out-Null
+          gh release download -R shinchiro/mpv-winbuild-cmake -p "mpv-dev-x86_64-2*.7z" -D libmpv --clobber
+          Get-ChildItem libmpv
+          7z x (Get-ChildItem libmpv\mpv-dev-x86_64-*.7z | Select-Object -First 1).FullName -olibmpv -y | Out-Null
+          Get-ChildItem libmpv -Recurse | Select-Object -First 40 FullName
+          lib /def:libmpv\mpv.def /name:libmpv-2.dll /out:libmpv\mpv.lib /machine:x64
+          Copy-Item libmpv\libmpv-2.dll src-tauri\binaries\libmpv-2.dll
+          "LIB=$env:LIB;$PWD\libmpv" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+
+      - run: npm install
+      - run: npm --prefix ui install
+      - name: Sidecars (yt-dlp, ffmpeg)
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then pwsh scripts/fetch-sidecars.ps1; else scripts/fetch-sidecars.sh ${{ matrix.target }}; fi
+      - run: npx tauri build --target ${{ matrix.target }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aurex-${{ matrix.target }}
+          path: |
+            target/${{ matrix.target }}/release/bundle/dmg/*.dmg
+            target/${{ matrix.target }}/release/bundle/macos/*.app
+            target/${{ matrix.target }}/release/bundle/nsis/*.exe
+            target/${{ matrix.target }}/release/bundle/msi/*.msi
+          if-no-files-found: error
