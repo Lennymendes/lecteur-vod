@@ -2,7 +2,7 @@
 
 Lecteur desktop **Twitch + YouTube** pour audiophiles (macOS / Windows) : sortie audio **exclusive** (CoreAudio hog mode / WASAPI Exclusive), fréquence du DAC alignée sur celle du flux (44,1 ↔ 48 kHz), anti-pub Twitch (playlist HLS nettoyée en local), SponsorBlock + zéro pub sur YouTube (voie native), et un **pont DSP C/C++** juste avant le DAC.
 
-> **État : V1.0 MVP, non compilée de bout en bout.** Le cœur (audio, HLS, YouTube natif) est testé sous Linux avec un backend factice et un vrai ffmpeg. CoreAudio, WASAPI, Tauri, libmpv, les surfaces vidéo natives et l'UI n'ont **pas** été compilés ni exécutés. Lisez `ARCHITECTURE.md` §0 avant de commencer ; la CI est faite pour la première compilation réelle.
+> **État : V1.0 MVP.** La CI compile le cœur, le shell Tauri et le build complet avec libmpv sur macOS (Apple Silicon) et Windows ; les installeurs sont dans Actions → *Build* → Artifacts. **Rien n'a été exécuté sur un vrai DAC/écran.** Historique :  Le cœur est testé en CI (3 OS, ffmpeg réel, backends factice). L'exclusivité CoreAudio/WASAPI, la surface vidéo sous la webview, libmpv, Twitch et l'UI n'ont **pas** été exécutés. Lisez `ARCHITECTURE.md` §0 avant de commencer ; la CI est faite pour la première compilation réelle.
 
 ## Démarrer
 Voir [`docs/BUILD.md`](docs/BUILD.md). En bref : `npm run setup`, `scripts/fetch-sidecars.sh`, `npm run dev`.
@@ -18,3 +18,7 @@ Voir [`docs/BUILD.md`](docs/BUILD.md). En bref : `npm run setup`, `scripts/fetch
 * Pas de rééchantillonnage de repli si le DAC refuse la fréquence du flux (erreur explicite).
 * Pas encore : OAuth, notifications, chat.
 * L'extraction YouTube native contrevient aux CGU de YouTube (choix assumé).
+
+## Tester les installeurs (CI)
+* **macOS** : `brew install mpv ffmpeg` (l'app dépend des dylibs Homebrew), puis ouvrir l'`.app` (non signée : clic droit → Ouvrir).
+* **Windows** : installeur `.exe`/`.msi` (libmpv-2.dll embarquée).
