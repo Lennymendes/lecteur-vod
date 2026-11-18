@@ -58,12 +58,22 @@ jobs:
         run: |
           if [ "$RUNNER_OS" = "Windows" ]; then pwsh scripts/fetch-sidecars.ps1; else scripts/fetch-sidecars.sh ${{ matrix.target }}; fi
       - run: npx tauri build --target ${{ matrix.target }}
+      - name: Embarquer libmpv + ffmpeg dans l'app (macOS, sans Homebrew côté utilisateur)
+        if: runner.os == 'macOS'
+        run: |
+          brew install dylibbundler
+          APP="target/${{ matrix.target }}/release/bundle/macos/Aurex.app"
+          mkdir -p "$APP/Contents/Frameworks"
+          dylibbundler -od -b -cd -x "$APP/Contents/MacOS/aurex" -x "$APP/Contents/MacOS/ffmpeg" \
+            -d "$APP/Contents/Frameworks" -p "@executable_path/../Frameworks/"
+          codesign --force --deep --sign - "$APP"
+          ditto -c -k --keepParent "$APP" Aurex-macos-arm64.zip
+          otool -L "$APP/Contents/MacOS/aurex" | head -20
       - uses: actions/upload-artifact@v4
         with:
           name: aurex-${{ matrix.target }}
           path: |
-            target/${{ matrix.target }}/release/bundle/dmg/*.dmg
-            target/${{ matrix.target }}/release/bundle/macos/*.app
+            Aurex-macos-arm64.zip
             target/${{ matrix.target }}/release/bundle/nsis/*.exe
             target/${{ matrix.target }}/release/bundle/msi/*.msi
           if-no-files-found: error
