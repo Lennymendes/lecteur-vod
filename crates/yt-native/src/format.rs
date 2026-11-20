@@ -1,9 +1,9 @@
 //! Modèle de formats + politique de sélection (pure, sans E/S : entièrement testée).
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Default)]
 pub struct Headers(pub Vec<(String, String)>);
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Default)]
 pub struct AudioFormat {
     pub id: String,
     pub url: String,
@@ -13,9 +13,15 @@ pub struct AudioFormat {
     pub channels: u16,
     pub protocol: String,
     pub headers: Headers,
+    /// `language_preference` de yt-dlp : 10 = piste originale, -1 = doublage, -10 = audiodescription.
+    pub lang_pref: i32,
+    /// Piste doublée ou audiodescription (xtags `acont=dubbed` / `descriptive`, ou note yt-dlp).
+    pub dubbed: bool,
+    /// Horodatage Unix avant lequel googlevideo répond 403 (pré-roll publicitaire imposé côté serveur).
+    pub available_at: Option<f64>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Default)]
 pub struct VideoFormat {
     pub id: String,
     pub url: String,
@@ -27,6 +33,7 @@ pub struct VideoFormat {
     pub protocol: String,
     pub has_audio: bool,
     pub headers: Headers,
+    pub available_at: Option<f64>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -77,10 +84,16 @@ pub fn select_audio<'a>(formats: &'a [AudioFormat], pol: &Policy) -> Option<&'a 
         CodecPref::Opus => is_opus(&f.codec),
         CodecPref::Aac => f.codec.starts_with("mp4a"),
     };
+    // Piste originale d'abord : on écarte doublages / audiodescription s'il existe autre chose,
+    // puis on garde la meilleure `language_preference` (10 = originale chez yt-dlp).
+    let usable = |f: &&AudioFormat| is_direct(&f.protocol) && f.channels <= 2;
+    let any_orig = formats.iter().filter(usable).any(|f| !f.dubbed);
+    let best_lang = formats.iter().filter(usable).filter(|f| !any_orig || !f.dubbed).map(|f| f.lang_pref).max();
     let pick = |only_pref: bool| {
         formats
             .iter()
-            .filter(|f| is_direct(&f.protocol) && f.channels <= 2 && (!only_pref || pref_ok(f)))
+            .filter(usable)
+            .filter(|f| (!any_orig || !f.dubbed) && Some(f.lang_pref) == best_lang && (!only_pref || pref_ok(f)))
             .max_by(|a, b| {
                 a.abr.partial_cmp(&b.abr).unwrap_or(std::cmp::Ordering::Equal).then((is_opus(&a.codec)).cmp(&is_opus(&b.codec)))
             })
@@ -139,10 +152,10 @@ mod tests {
     use super::*;
 
     fn a(id: &str, codec: &str, abr: f64, ch: u16, proto: &str) -> AudioFormat {
-        AudioFormat { id: id.into(), url: format!("https://x/{id}"), codec: codec.into(), abr, asr: 48_000, channels: ch, protocol: proto.into(), headers: Headers(vec![]) }
+        AudioFormat { id: id.into(), url: format!("https://x/{id}"), codec: codec.into(), abr, asr: 48_000, channels: ch, protocol: proto.into(), ..Default::default() }
     }
     fn v(id: &str, codec: &str, h: u32, fps: f64, tbr: f64) -> VideoFormat {
-        VideoFormat { id: id.into(), url: format!("https://x/{id}"), codec: codec.into(), width: h * 16 / 9, height: h, fps, tbr, protocol: "https".into(), has_audio: false, headers: Headers(vec![]) }
+        VideoFormat { id: id.into(), url: format!("https://x/{id}"), codec: codec.into(), width: h * 16 / 9, height: h, fps, tbr, protocol: "https".into(), has_audio: false, ..Default::default() }
     }
 
     #[test]
@@ -187,6 +200,14 @@ mod tests {
     fn routes() {
         let mut r = Resolved { audio: vec![a("251", "opus", 135.0, 2, "https")], video: vec![v("299", "avc1", 1080, 60.0, 4000.0)], ..Default::default() };
         assert!(matches!(choose_route(&r, &Policy::default()), Some(Route::Native { video: Some(_), .. })));
+        // Doublage à plus haut débit : la piste originale l'emporte quand même.
+        let mut dub = a("251-dub", "opus", 300.0, 2, "https");
+        dub.dubbed = true;
+        let mut orig = a("251", "opus", 130.0, 2, "https");
+        orig.lang_pref = 10;
+        let pol = Policy::default();
+        assert_eq!(select_audio(&[dub.clone(), orig.clone()], &pol).unwrap().id, "251");
+        assert_eq!(select_audio(&[dub], &pol).unwrap().id, "251-dub"); // seul choix possible
         r.is_live = true;
         assert_eq!(choose_route(&r, &Policy::default()), None); // direct sans URL : rien d'exploitable
         r.live_url = Some("https://x/live.m3u8".into());

@@ -12,7 +12,7 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager, State};
-use yt_native::decode::{AudioEvent, AudioSource, DecoderConfig};
+use yt_native::decode::{AudioEvent, AudioSource, DecoderConfig, PipeSource};
 use yt_native::extract::YtDlp;
 use yt_native::format::{choose_route, video_id, Policy, Route};
 use yt_native::playback::{Playback, PlaybackEvent, PlaybackSink, VideoControl};
@@ -121,6 +121,27 @@ fn yt_play_blocking(app: AppHandle, input: String, start: f64, max_height: u32, 
     let route = choose_route(&resolved, &pol).ok_or("aucun format audio exploitable (flux protégé ou indisponible)")?;
     crate::log::log(format!("yt: « {} » live={} audio={} vidéo={}", resolved.title, resolved.is_live, resolved.audio.len(), resolved.video.len()));
 
+    if let Route::Native { audio, video } = &route {
+        crate::log::log(format!(
+            "yt: audio itag {} ({}, {:.0} kb/s, langue {}{}), vidéo {}",
+            audio.id,
+            audio.codec,
+            audio.abr,
+            audio.lang_pref,
+            if audio.dubbed { ", doublée" } else { "" },
+            video.map(|v| format!("itag {} {}p {}", v.id, v.height, v.codec)).unwrap_or_else(|| "aucune".into())
+        ));
+        // Pré-roll publicitaire imposé côté serveur : googlevideo répond 403 avant `available_at`.
+        let until = [audio.available_at, video.and_then(|v| v.available_at)].into_iter().flatten().fold(0.0f64, f64::max);
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0);
+        let wait = (until - now).clamp(0.0, 120.0);
+        if wait > 0.0 {
+            crate::log::log(format!("yt: YouTube impose {wait:.0} s d'attente (available_at)"));
+            let _ = app.emit(EV_NOTICE, Notice { kind: "info", text: format!("YouTube impose {wait:.0} s d'attente avant le flux"), from: None, to: None });
+            std::thread::sleep(Duration::from_secs_f64(wait + 0.5));
+        }
+    }
+
     // Libère le DAC / arrête mpv AVANT d'ouvrir quoi que ce soit.
     st.stop_all(true);
 
@@ -147,7 +168,7 @@ fn yt_play_blocking(app: AppHandle, input: String, start: f64, max_height: u32, 
         Route::Native { audio, video: vf } => {
             let ctrl: Arc<dyn VideoControl> = match (&video, vf) {
                 (Some(v), Some(vf)) => {
-                    v.load_video_only(&vf.url, user_agent(&vf.headers).as_deref(), start)?;
+                    v.load_video_only(&vf.url, user_agent(&vf.headers).as_deref(), &vf.headers.0, start)?;
                     v.clone()
                 }
                 _ => Arc::new(NoVideo),
@@ -157,7 +178,19 @@ fn yt_play_blocking(app: AppHandle, input: String, start: f64, max_height: u32, 
             let segments = fetch_segments(SPONSORBLOCK_API, &id, DEFAULT_CATEGORIES).unwrap_or_default();
             let engine = AudioEngine::new(default_output().map_err(|e| e.to_string())?);
             let cfg = DecoderConfig { ffmpeg: sidecar::path("ffmpeg"), user_agent: user_agent(&audio.headers) };
-            let src = AudioSource { url: audio.url.clone(), headers: audio.headers.0.clone() };
+            let mut src = AudioSource::direct(audio.url.clone(), audio.headers.0.clone());
+            let dlp = yt_dlp();
+            let mut args = dlp.extra_args.clone();
+            args.extend(["-f".into(), audio.id.clone(), format!("https://www.youtube.com/watch?v={id}")]);
+            src.pipe = Some(PipeSource { ytdlp: dlp.path.clone(), args });
+            {
+                // Journal : savoir si l'URL directe a été refusée et le tube yt-dlp utilisé.
+                let flag = src.use_pipe.clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(Duration::from_secs(25));
+                    crate::log::log(if flag.load(Ordering::SeqCst) { "yt: audio via tube yt-dlp -> ffmpeg (URL directe refusée)" } else { "yt: audio via URL directe" });
+                });
+            }
 
             let sink: PlaybackSink = {
                 let app = app.clone();

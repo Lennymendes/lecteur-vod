@@ -10,7 +10,7 @@ impl Video {
     pub fn load_live(&self, _url: &str, _ua: Option<&str>) -> Result<(), String> {
         Err("libmpv non compilé".into())
     }
-    pub fn load_video_only(&self, _url: &str, _ua: Option<&str>, _start: f64) -> Result<(), String> {
+    pub fn load_video_only(&self, _url: &str, _ua: Option<&str>, _headers: &[(String, String)], _start: f64) -> Result<(), String> {
         Err("libmpv non compilé".into())
     }
     pub fn stop(&self) {}

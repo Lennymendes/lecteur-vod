@@ -38,6 +38,9 @@ struct RawFormat {
     tbr: Option<f64>,
     protocol: Option<String>,
     http_headers: Option<HashMap<String, String>>,
+    available_at: Option<f64>,
+    language_preference: Option<i64>,
+    format_note: Option<String>,
 }
 
 #[derive(Deserialize, Default)]
@@ -77,7 +80,16 @@ pub fn parse_info(json: &str) -> Result<Resolved, String> {
             }
         }
         if a && !v {
+            let note = f.format_note.clone().unwrap_or_default().to_lowercase();
+            let dubbed = url.contains("acont%3Ddubbed")
+                || url.contains("acont=dubbed")
+                || url.contains("acont%3Ddescriptive")
+                || note.contains("dubbed")
+                || note.contains("descriptive");
             r.audio.push(AudioFormat {
+                lang_pref: f.language_preference.unwrap_or(0) as i32,
+                dubbed,
+                available_at: f.available_at,
                 id,
                 url,
                 codec: f.acodec.clone().unwrap_or_default(),
@@ -99,6 +111,7 @@ pub fn parse_info(json: &str) -> Result<Resolved, String> {
                 protocol,
                 has_audio: a,
                 headers,
+                available_at: f.available_at,
             });
         }
     }

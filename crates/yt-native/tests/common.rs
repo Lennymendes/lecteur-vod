@@ -28,5 +28,5 @@ pub fn gen(name: &str, rate: u32, secs: f64, ch: u32, codec: &[&str]) -> PathBuf
 }
 
 pub fn src(p: &Path) -> yt_native::decode::AudioSource {
-    yt_native::decode::AudioSource { url: p.to_string_lossy().into_owned(), headers: vec![] }
+    yt_native::decode::AudioSource::direct(p.to_string_lossy().into_owned(), vec![])
 }

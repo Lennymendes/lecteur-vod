@@ -11,7 +11,7 @@ use std::collections::VecDeque;
 use std::io::{BufRead, BufReader, Read};
 use std::path::PathBuf;
 use std::process::{Child, ChildStdout, Command, Stdio};
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, TryRecvError};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
@@ -21,6 +21,28 @@ use std::time::Duration;
 pub struct AudioSource {
     pub url: String,
     pub headers: Vec<(String, String)>,
+    /// Repli : `yt-dlp <args> -o -` télécharge lui-même (sa session HTTP, ses jetons, ses attentes)
+    /// et alimente ffmpeg par un tube. Utilisé si googlevideo refuse l'URL directe (403).
+    pub pipe: Option<PipeSource>,
+    /// Passe à `true` après un 403 : les relances suivantes (seek) partent directement en tube.
+    pub use_pipe: Arc<AtomicBool>,
+}
+
+impl AudioSource {
+    pub fn direct(url: String, headers: Vec<(String, String)>) -> Self {
+        AudioSource { url, headers, pipe: None, use_pipe: Arc::new(AtomicBool::new(false)) }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct PipeSource {
+    pub ytdlp: PathBuf,
+    /// Arguments complets SANS `-o -` (ex. `-f 251 --js-runtimes deno:… URL`).
+    pub args: Vec<String>,
+}
+
+fn is_forbidden(e: &str) -> bool {
+    e.contains("403") || e.contains("Forbidden") || e.contains("Input/output error")
 }
 
 #[derive(Clone, Debug)]
@@ -64,6 +86,8 @@ pub fn parse_stream_line(line: &str) -> Option<StreamFormat> {
 
 pub struct PcmReader {
     child: Child,
+    /// yt-dlp qui alimente ffmpeg en mode tube.
+    feeder: Option<Child>,
     stdout: ChildStdout,
     fmt: StreamFormat,
     buf: Vec<u8>,
@@ -72,24 +96,94 @@ pub struct PcmReader {
 
 impl PcmReader {
     /// Lance ffmpeg à `start` secondes et attend le sondage du flux (fréquence réelle).
+    /// URL directe d'abord ; sur 403, repli par tube yt-dlp -> ffmpeg (si `src.pipe` est fourni).
     pub fn spawn(cfg: &DecoderConfig, src: &AudioSource, start: f64) -> Result<Self, String> {
-        let mut cmd = Command::new(&cfg.ffmpeg);
-        cmd.args(["-hide_banner", "-nostdin", "-loglevel", "info"]);
+        if let Some(p) = &src.pipe {
+            if src.use_pipe.load(Ordering::SeqCst) {
+                return Self::spawn_piped(cfg, p, start);
+            }
+        }
+        match Self::spawn_direct(cfg, src, start) {
+            Ok(r) => Ok(r),
+            Err(e) if src.pipe.is_some() && is_forbidden(&e) => {
+                src.use_pipe.store(true, Ordering::SeqCst);
+                Self::spawn_piped(cfg, src.pipe.as_ref().unwrap(), start).map_err(|e2| format!("{e} ; repli yt-dlp : {e2}"))
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    fn spawn_direct(cfg: &DecoderConfig, src: &AudioSource, start: f64) -> Result<Self, String> {
+        let mut pre: Vec<String> = vec![];
         if src.url.starts_with("http") {
-            if let Some(ua) = &cfg.user_agent {
-                cmd.args(["-user_agent", ua]);
+            // Mêmes en-têtes que yt-dlp, User-Agent une seule fois (googlevideo lie l'URL au client).
+            let ua = src.headers.iter().find(|(k, _)| k.eq_ignore_ascii_case("user-agent")).map(|(_, v)| v.clone()).or_else(|| cfg.user_agent.clone());
+            if let Some(ua) = ua {
+                pre.extend(["-user_agent".into(), ua]);
             }
-            if !src.headers.is_empty() {
-                let h: String = src.headers.iter().map(|(k, v)| format!("{k}: {v}\r\n")).collect();
-                cmd.args(["-headers", &h]);
+            let h: String = src.headers.iter().filter(|(k, _)| !k.eq_ignore_ascii_case("user-agent")).map(|(k, v)| format!("{k}: {v}\r\n")).collect();
+            if !h.is_empty() {
+                pre.extend(["-headers".into(), h]);
             }
-            cmd.args(["-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5"]);
+            pre.extend(["-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5"].map(String::from));
         }
         if start > 0.0 {
-            cmd.args(["-ss", &format!("{start:.3}")]);
+            pre.extend(["-ss".into(), format!("{start:.3}")]);
         }
-        cmd.args(["-i", &src.url, "-vn", "-sn", "-dn", "-map", "0:a:0", "-f", "f32le", "-acodec", "pcm_f32le", "pipe:1"]);
+        Self::launch(cfg, pre, &src.url, vec![], None)
+    }
+
+    fn spawn_piped(cfg: &DecoderConfig, p: &PipeSource, start: f64) -> Result<Self, String> {
+        let mut cmd = Command::new(&p.ytdlp);
+        cmd.args(["--quiet", "--no-warnings", "--no-part", "--no-progress"]).args(&p.args).args(["-o", "-"]);
         cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x0800_0000);
+        }
+        let mut feeder = cmd.spawn().map_err(|e| format!("lancement de yt-dlp ({}) : {e}", p.ytdlp.display()))?;
+        let out = feeder.stdout.take().ok_or("stdout yt-dlp indisponible")?;
+        let err_tail: Arc<Mutex<VecDeque<String>>> = Arc::new(Mutex::new(VecDeque::new()));
+        if let Some(err) = feeder.stderr.take() {
+            let t = err_tail.clone();
+            thread::spawn(move || {
+                for line in BufReader::new(err).lines().map_while(Result::ok) {
+                    let mut t = t.lock().unwrap();
+                    if t.len() >= 4 {
+                        t.pop_front();
+                    }
+                    t.push_back(line);
+                }
+            });
+        }
+        // Tube non positionnable : le seek se fait APRÈS l'entrée (décodage puis rejet jusqu'à `start`).
+        let post = if start > 0.0 { vec!["-ss".into(), format!("{start:.3}")] } else { vec![] };
+        match Self::launch(cfg, vec![], "pipe:0", post, Some(Stdio::from(out))) {
+            Ok(mut r) => {
+                r.feeder = Some(feeder);
+                Ok(r)
+            }
+            Err(e) => {
+                let _ = feeder.kill();
+                let _ = feeder.wait();
+                let y = err_tail.lock().unwrap().iter().cloned().collect::<Vec<_>>().join(" | ");
+                Err(if y.is_empty() { e } else { format!("{e} ; yt-dlp : {y}") })
+            }
+        }
+    }
+
+    fn launch(cfg: &DecoderConfig, pre: Vec<String>, input: &str, post: Vec<String>, stdin: Option<Stdio>) -> Result<Self, String> {
+        let piped = stdin.is_some();
+        let mut cmd = Command::new(&cfg.ffmpeg);
+        cmd.args(["-hide_banner", "-loglevel", "info"]);
+        if !piped {
+            cmd.arg("-nostdin");
+        }
+        cmd.args(&pre);
+        cmd.args(["-i", input]).args(&post);
+        cmd.args(["-vn", "-sn", "-dn", "-map", "0:a:0", "-f", "f32le", "-acodec", "pcm_f32le", "pipe:1"]);
+        cmd.stdin(stdin.unwrap_or_else(Stdio::null)).stdout(Stdio::piped()).stderr(Stdio::piped());
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
@@ -119,7 +213,8 @@ impl PcmReader {
             }
         });
 
-        let fmt = match prx.recv_timeout(Duration::from_secs(20)) {
+        // En tube, yt-dlp peut d'abord extraire puis attendre la fin d'un pré-roll imposé par YouTube.
+        let fmt = match prx.recv_timeout(Duration::from_secs(if piped { 90 } else { 20 })) {
             Ok(f) => f,
             Err(e) => {
                 let _ = child.kill();
@@ -132,7 +227,7 @@ impl PcmReader {
                 });
             }
         };
-        Ok(PcmReader { child, stdout, fmt, buf: vec![0; 4096 * fmt.channels as usize * 4], carry: 0 })
+        Ok(PcmReader { child, feeder: None, stdout, fmt, buf: vec![0; 4096 * fmt.channels as usize * 4], carry: 0 })
     }
 
     pub fn format(&self) -> StreamFormat {
@@ -163,6 +258,10 @@ impl Drop for PcmReader {
     fn drop(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
+        if let Some(f) = &mut self.feeder {
+            let _ = f.kill();
+            let _ = f.wait();
+        }
     }
 }
 

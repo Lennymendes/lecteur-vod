@@ -63,7 +63,7 @@ impl Video {
     }
 
     /// Charge la vidéo seule, EN PAUSE à `start` ; `Playback` la démarre quand l'audio sort.
-    pub fn load_video_only(&self, url: &str, user_agent: Option<&str>, start: f64) -> Result<(), String> {
+    pub fn load_video_only(&self, url: &str, user_agent: Option<&str>, headers: &[(String, String)], start: f64) -> Result<(), String> {
         let m = self.m();
         let e = |e: libmpv2::Error| e.to_string();
         m.set_property("aid", "no").map_err(e)?;
@@ -73,6 +73,11 @@ impl Video {
         m.set_property("pause", true).map_err(e)?;
         if let Some(ua) = user_agent {
             m.set_property("user-agent", ua).map_err(e)?;
+        }
+        // Autres en-têtes de yt-dlp (Referer, Origin…). `Accept` est omis : ses virgules casseraient la liste.
+        let _ = m.command("change-list", &["http-header-fields", "clr", ""]);
+        for (k, v) in headers.iter().filter(|(k, _)| !k.eq_ignore_ascii_case("user-agent") && !k.eq_ignore_ascii_case("accept")) {
+            let _ = m.command("change-list", &["http-header-fields", "append", &format!("{k}: {v}")]);
         }
         m.command("loadfile", &[url, "replace"]).map_err(e)
     }
