@@ -6,7 +6,7 @@ const PLAYERS: { id: Player; label: string; hint: string; mac?: boolean }[] = [
   { id: "vlc", label: "VLC", hint: "Doit être installé. Twitch passe par le proxy anti-pub d'Aurex." },
   { id: "mpv", label: "mpv", hint: "Doit être installé (Homebrew, scoop…)." },
   { id: "iina", label: "IINA", hint: "macOS uniquement.", mac: true },
-  { id: "custom", label: "Commande personnalisée", hint: "Jetons : {video} {audio} {title}" },
+  { id: "custom", label: "Commande personnalisée", hint: "Jetons : {video} {audio} {title} {ua}" },
 ];
 
 export function SettingsPanel({ s, onChange, onClose, os, dspInstalled }: {

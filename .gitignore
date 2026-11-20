@@ -6,3 +6,4 @@
 !/src-tauri/binaries/README.md
 .DS_Store
 *.log
+/src-tauri/resources/cacert.pem

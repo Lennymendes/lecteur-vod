@@ -126,9 +126,9 @@ fn yt_play_blocking(app: AppHandle, input: String, start: f64, max_height: u32, 
 
     if let Some(ext) = external {
         let name = match &route {
-            Route::MpvFallback { url } => crate::external::launch(&ext, url, None, &resolved.title)?,
-            Route::Native { audio, video: Some(v) } => crate::external::launch(&ext, &v.url, Some(&audio.url), &resolved.title)?,
-            Route::Native { audio, video: None } => crate::external::launch(&ext, &audio.url, None, &resolved.title)?,
+            Route::MpvFallback { url } => crate::external::launch(&ext, url, None, &resolved.title, &[])?,
+            Route::Native { audio, video: Some(v) } => crate::external::launch(&ext, &v.url, Some(&audio.url), &resolved.title, &v.headers.0)?,
+            Route::Native { audio, video: None } => crate::external::launch(&ext, &audio.url, None, &resolved.title, &audio.headers.0)?,
         };
         return Ok(PlayInfo { title: format!("{} — dans {name}", resolved.title), duration: resolved.duration, route: "external", video: false });
     }
@@ -222,7 +222,7 @@ pub async fn twitch_play(
 
     *st.current.lock().unwrap() = Current::Twitch(TwitchSession { channel: channel.clone(), paused: false });
     let external_name = match (&external, &video) {
-        (Some(ext), _) => Some(crate::external::launch(ext, &url, None, &channel)?),
+        (Some(ext), _) => Some(crate::external::launch(ext, &url, None, &channel, &[])?),
         (None, Some(v)) => {
             v.load_live(&url, None)?;
             None
@@ -400,16 +400,36 @@ fn spawn_ticker(app: AppHandle, gen: u64) {
 /// jusqu'à les obtenir, pour alimenter le badge (fréquence/format réellement envoyés au DAC).
 fn spawn_mpv_audio_probe(app: AppHandle, gen: u64) {
     tauri::async_runtime::spawn(async move {
-        for _ in 0..40 {
+        // Formats entiers essayés, dans l'ordre, si le DAC n'est pas à la fréquence de la source.
+        const FALLBACK: [&str; 3] = ["s32", "s24", "s16"];
+        let mut tried = 0usize;
+        for _ in 0..60 {
             tokio::time::sleep(Duration::from_millis(500)).await;
             let st = app.state::<AppState>();
             if st.generation.load(Ordering::SeqCst) != gen {
                 return;
             }
-            if let Some((rate, fmt)) = st.video().and_then(|v| v.audio_out()) {
-                let _ = app.emit(EV_AUDIO, AudioBadge::mpv(rate, &fmt));
+            let Some(v) = st.video() else { return };
+            let (Some((rate, fmt)), Some(src)) = (v.audio_out(), v.audio_in_rate()) else { continue };
+            if src != rate && tried < FALLBACK.len() {
+                crate::log::log(format!("mpv: source {src} Hz mais DAC à {rate} Hz ({fmt}) → essai audio-format={}", FALLBACK[tried]));
+                v.retry_audio_format(FALLBACK[tried]);
+                tried += 1;
+                tokio::time::sleep(Duration::from_millis(700)).await;
+                continue;
+            }
+            if src != rate {
+                crate::log::log(format!("mpv: aucun format n'offre {src} Hz sur ce DAC ; retour au choix de mpv"));
+                v.retry_audio_format("no");
+                tokio::time::sleep(Duration::from_millis(700)).await;
+                if let Some((r, f)) = v.audio_out() {
+                    let _ = app.emit(EV_AUDIO, AudioBadge::mpv(src, r, &f));
+                }
                 return;
             }
+            crate::log::log(format!("mpv: sortie {rate} Hz {fmt} = fréquence source"));
+            let _ = app.emit(EV_AUDIO, AudioBadge::mpv(src, rate, &fmt));
+            return;
         }
     });
 }

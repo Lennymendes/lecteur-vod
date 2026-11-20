@@ -57,6 +57,7 @@ jobs:
         shell: bash
         run: |
           T=$(rustc -vV | sed -n 's/^host: //p'); E=""; [[ "$T" == *windows* ]] && E=".exe"
+          mkdir -p src-tauri/resources && : > src-tauri/resources/cacert.pem
           for n in yt-dlp ffmpeg deno; do : > "src-tauri/binaries/$n-$T$E"; done
           [[ "$T" == *windows* ]] && : > src-tauri/binaries/libmpv-2.dll || true
       - run: cargo check -p aurex --no-default-features

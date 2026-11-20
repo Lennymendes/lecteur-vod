@@ -1,5 +1,8 @@
 {
   "bundle": {
-    "resources": { "binaries/libmpv-2.dll": "libmpv-2.dll" }
+    "resources": {
+      "binaries/libmpv-2.dll": "libmpv-2.dll",
+      "resources/cacert.pem": "cacert.pem"
+    }
   }
 }

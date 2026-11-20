@@ -47,13 +47,15 @@ impl AudioBadge {
     }
 
     /// Twitch / direct : mpv choisit le format ; on ne peut affirmer « bit-perfect » que de façon limitée.
-    pub fn mpv(rate: u32, fmt: &str) -> Self {
+    pub fn mpv(source_rate: u32, rate: u32, fmt: &str) -> Self {
         AudioBadge {
             path: "mpv",
-            source_rate: rate,
+            source_rate,
             device_rate: rate,
+            rate_switched: source_rate == rate,
             device_bits: match fmt {
                 "s16" | "s16p" => 16,
+                "s24" | "s24p" => 24,
                 "s32" | "s32p" => 32,
                 _ => 0,
             },

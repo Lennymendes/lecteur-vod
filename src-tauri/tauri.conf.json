@@ -41,10 +41,14 @@
     ],
     "externalBin": [
       "binaries/yt-dlp",
-      "binaries/ffmpeg", "binaries/deno"
+      "binaries/ffmpeg",
+      "binaries/deno"
     ],
     "macOS": {
       "signingIdentity": "-"
+    },
+    "resources": {
+      "resources/cacert.pem": "cacert.pem"
     }
   }
 }

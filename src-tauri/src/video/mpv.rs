@@ -52,6 +52,10 @@ impl Video {
         m.set_property("start", "none").map_err(e)?;
         m.set_property("speed", 1.0f64).map_err(e)?;
         m.set_property("pause", false).map_err(e)?;
+        // Repart du format préféré de mpv (float) ; voir `retry_audio_format`.
+        if let Err(err) = m.set_property("audio-format", "no") {
+            crate::log::log(format!("mpv: réinitialisation audio-format : {err:?}"));
+        }
         if let Some(ua) = user_agent {
             m.set_property("user-agent", ua).map_err(e)?;
         }
@@ -83,6 +87,25 @@ impl Video {
         let rate = m.get_property::<i64>("audio-out-params/samplerate").ok()?;
         let fmt = m.get_property::<String>("audio-out-params/format").unwrap_or_default();
         Some((rate as u32, fmt))
+    }
+
+    /// Fréquence décodée de la source (avant toute conversion).
+    pub fn audio_in_rate(&self) -> Option<u32> {
+        self.m().get_property::<i64>("audio-params/samplerate").ok().map(|r| r as u32)
+    }
+
+    /// CoreAudio exclusif : mpv classe les formats du DAC d'abord par format d'échantillon (float > s32 > s24…)
+    /// PUIS par fréquence. Si le DAC n'expose le float/32 bits qu'à 176,4 kHz, mpv choisit 176,4 kHz et
+    /// rééchantillonne. Imposer un format entier (`audio-format`) puis rouvrir la sortie remet la
+    /// fréquence exacte en tête du classement.
+    pub fn retry_audio_format(&self, fmt: &str) {
+        let m = self.m();
+        if let Err(e) = m.set_property("audio-format", fmt) {
+            crate::log::log(format!("mpv: audio-format={fmt} refusé : {e:?}"));
+        }
+        if let Err(e) = m.command("ao-reload", &[]) {
+            crate::log::log(format!("mpv: ao-reload : {e:?}"));
+        }
     }
 }
 

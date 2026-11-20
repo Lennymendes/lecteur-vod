@@ -38,8 +38,28 @@ fn setup_vulkan_icd() {
     }
 }
 
+/// ffmpeg embarqué (OpenSSL) vérifie les certificats TLS mais cherche son magasin dans le préfixe
+/// Homebrew de la machine de build. On fournit `cacert.pem` (bundle Mozilla) via SSL_CERT_FILE,
+/// hérité par les processus ffmpeg lancés ensuite.
+fn setup_ca_bundle() {
+    let Some(dir) = std::env::current_exe().ok().and_then(|e| e.parent().map(|d| d.to_path_buf())) else { return };
+    let cands = [
+        dir.join("../Resources/cacert.pem"),
+        dir.join("cacert.pem"),
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/cacert.pem"),
+    ];
+    match cands.iter().find(|p| p.metadata().map(|m| m.len() > 1000).unwrap_or(false)) {
+        Some(p) => {
+            std::env::set_var("SSL_CERT_FILE", p);
+            log::log(format!("tls: SSL_CERT_FILE = {}", p.display()));
+        }
+        None => log::log("tls: cacert.pem introuvable (ffmpeg risque d'échouer sur HTTPS)"),
+    }
+}
+
 pub fn run() {
     setup_vulkan_icd();
+    setup_ca_bundle();
     tauri::Builder::default()
         .manage(AppState::default())
         .invoke_handler(tauri::generate_handler![

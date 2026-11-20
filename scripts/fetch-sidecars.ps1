@@ -16,4 +16,8 @@ Write-Host "-> deno ($triple)"
 Invoke-WebRequest "https://github.com/denoland/deno/releases/latest/download/deno-$triple.zip" -OutFile "$tmp\deno.zip"
 Expand-Archive "$tmp\deno.zip" -DestinationPath "$tmp\deno"
 Copy-Item "$tmp\deno\deno.exe" (Join-Path $dir "deno-$triple.exe")
+Write-Host "-> cacert.pem"
+$res = Join-Path $PSScriptRoot "..\src-tauri\resources"
+New-Item -ItemType Directory -Force $res | Out-Null
+Invoke-WebRequest "https://curl.se/ca/cacert.pem" -OutFile (Join-Path $res "cacert.pem")
 Get-ChildItem $dir

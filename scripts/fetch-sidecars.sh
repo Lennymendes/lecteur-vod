@@ -42,4 +42,7 @@ echo "→ deno ($TRIPLE)"
 curl -fL "https://github.com/denoland/deno/releases/latest/download/deno-$TRIPLE.zip" -o "$tmp/deno.zip"
 unzip -o -q "$tmp/deno.zip" -d "$tmp/deno"; mv "$tmp/deno/deno$EXT" "deno-$TRIPLE$EXT"; chmod +x "deno-$TRIPLE$EXT"
 rm -rf "$tmp"
-ls -lh .
+# Certificats racines (Mozilla, via curl.se) pour le TLS de ffmpeg.
+echo "→ cacert.pem"
+mkdir -p ../resources && curl -fL "https://curl.se/ca/cacert.pem" -o ../resources/cacert.pem
+ls -lh . ../resources
