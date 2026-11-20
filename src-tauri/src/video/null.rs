@@ -17,6 +17,10 @@ impl Video {
     pub fn audio_out(&self) -> Option<(u32, String)> {
         None
     }
+    pub fn audio_in_rate(&self) -> Option<u32> {
+        None
+    }
+    pub fn retry_audio_format(&self, _fmt: &str) {}
 }
 
 impl VideoControl for Video {
