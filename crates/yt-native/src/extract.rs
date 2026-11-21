@@ -126,7 +126,7 @@ impl YtDlp {
     pub fn resolve(&self, url_or_id: &str) -> Result<Resolved, String> {
         let target = if url_or_id.starts_with("http") { url_or_id.to_string() } else { format!("https://www.youtube.com/watch?v={url_or_id}") };
         let mut cmd = Command::new(&self.path);
-        cmd.args(["-J", "--no-playlist", "--no-warnings", "--skip-download"]).args(&self.extra_args).arg(&target);
+        cmd.args(["-J", "-v", "--no-playlist", "--skip-download"]).args(&self.extra_args).arg(&target);
         cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
         #[cfg(windows)]
         {
@@ -138,7 +138,17 @@ impl YtDlp {
             let err = String::from_utf8_lossy(&out.stderr);
             return Err(format!("yt-dlp : {}", err.lines().last().unwrap_or("échec")));
         }
-        parse_info(&String::from_utf8_lossy(&out.stdout))
+        let mut r = parse_info(&String::from_utf8_lossy(&out.stdout))?;
+        r.diag = String::from_utf8_lossy(&out.stderr)
+            .lines()
+            .filter(|l| {
+                let l = l.to_lowercase();
+                ["js runtime", "jsc", "challenge", "warning", "error", "player", "client", "po token", "yt-dlp version", "throttl"].iter().any(|k| l.contains(k))
+            })
+            .map(|l| l.chars().take(240).collect())
+            .take(40)
+            .collect();
+        Ok(r)
     }
 }
 

@@ -20,7 +20,7 @@ pub struct Servo {
 
 impl Default for Servo {
     fn default() -> Self {
-        Servo { hard_threshold: 0.15, deadband: 0.012, max_adjust: 0.05, gain: 0.5 }
+        Servo { hard_threshold: 0.4, deadband: 0.012, max_adjust: 0.1, gain: 0.8 }
     }
 }
 
@@ -76,8 +76,8 @@ mod tests {
     #[test]
     fn speed_is_bounded() {
         let s = Servo::default();
-        match s.step(10.14, 10.0) {
-            ServoAction::Speed(v) => assert!((0.949..=0.951).contains(&v), "{v}"),
+        match s.step(10.3, 10.0) {
+            ServoAction::Speed(v) => assert!((0.899..=0.901).contains(&v), "{v}"),
             _ => panic!(),
         }
     }

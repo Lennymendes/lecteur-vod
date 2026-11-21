@@ -46,6 +46,8 @@ pub struct Resolved {
     pub live_url: Option<String>,
     pub audio: Vec<AudioFormat>,
     pub video: Vec<VideoFormat>,
+    /// Lignes de diagnostic de yt-dlp (`-v`) : runtime JS, défis n/sig, clients, avertissements.
+    pub diag: Vec<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -29,6 +29,17 @@ impl Video {
             init.set_property("input-vo-keyboard", "no")?;
             init.set_property("keep-open", "yes")?;
             init.set_property("idle", "yes")?;
+            // Réseau : gros cache en avance + reconnexion si googlevideo coupe la connexion.
+            init.set_property("cache", "yes")?;
+            init.set_property("demuxer-max-bytes", "256MiB")?;
+            init.set_property("demuxer-readahead-secs", 120i64)?;
+            if let Err(e) = init.set_property("stream-lavf-o", "reconnect=1,reconnect_streamed=1,reconnect_delay_max=5") {
+                crate::log::log(format!("mpv: stream-lavf-o refusé : {e:?}"));
+            }
+            // `audio-format` (forcé par la sonde de fréquence) revient à sa valeur initiale à chaque fichier.
+            if let Err(e) = init.set_property("reset-on-next-file", "audio-format") {
+                crate::log::log(format!("mpv: reset-on-next-file refusé : {e:?}"));
+            }
             // Sortie audio de mpv (utilisée seulement par load_live) : exclusive, sans traitement.
             init.set_property("ao", if cfg!(windows) { "wasapi" } else { "coreaudio_exclusive" })?;
             init.set_property("audio-exclusive", "yes")?;
@@ -52,10 +63,6 @@ impl Video {
         m.set_property("start", "none").map_err(e)?;
         m.set_property("speed", 1.0f64).map_err(e)?;
         m.set_property("pause", false).map_err(e)?;
-        // Repart du format préféré de mpv (float) ; voir `retry_audio_format`.
-        if let Err(err) = m.set_property("audio-format", "no") {
-            crate::log::log(format!("mpv: réinitialisation audio-format : {err:?}"));
-        }
         if let Some(ua) = user_agent {
             m.set_property("user-agent", ua).map_err(e)?;
         }
@@ -126,5 +133,9 @@ impl VideoControl for Video {
     }
     fn set_pause(&self, paused: bool) {
         let _ = self.m().set_property("pause", paused);
+    }
+    fn stalled(&self) -> bool {
+        let m = self.m();
+        m.get_property::<bool>("seeking").unwrap_or(false) || m.get_property::<bool>("paused-for-cache").unwrap_or(false)
     }
 }

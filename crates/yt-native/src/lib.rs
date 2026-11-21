@@ -19,3 +19,5 @@ pub mod sponsorblock;
 
 #[cfg(feature = "net")]
 pub mod extract;
+#[cfg(feature = "net")]
+pub mod probe;

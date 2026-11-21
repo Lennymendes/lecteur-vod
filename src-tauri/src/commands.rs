@@ -120,6 +120,9 @@ fn yt_play_blocking(app: AppHandle, input: String, start: f64, max_height: u32, 
     let pol = Policy { max_height, ..Policy::default() };
     let route = choose_route(&resolved, &pol).ok_or("aucun format audio exploitable (flux protégé ou indisponible)")?;
     crate::log::log(format!("yt: « {} » live={} audio={} vidéo={}", resolved.title, resolved.is_live, resolved.audio.len(), resolved.video.len()));
+    for l in &resolved.diag {
+        crate::log::log(format!("yt-dlp> {l}"));
+    }
 
     if let Route::Native { audio, video } = &route {
         crate::log::log(format!(
@@ -131,6 +134,24 @@ fn yt_play_blocking(app: AppHandle, input: String, start: f64, max_height: u32, 
             if audio.dubbed { ", doublée" } else { "" },
             video.map(|v| format!("itag {} {}p {}", v.id, v.height, v.codec)).unwrap_or_else(|| "aucune".into())
         ));
+        let client = |u: &str| u.split(['?', '&']).find_map(|p| p.strip_prefix("c=")).unwrap_or("?").to_string();
+        crate::log::log(format!("yt: client audio={} vidéo={}", client(&audio.url), video.map(|v| client(&v.url)).unwrap_or_default()));
+        // Débit réel de googlevideo (bridage « n » si ~0,05–0,1 Mo/s), mesuré en tâche de fond.
+        {
+            let mut probes = vec![("audio", audio.url.clone(), audio.headers.0.clone())];
+            if let Some(v) = video {
+                probes.push(("vidéo", v.url.clone(), v.headers.0.clone()));
+            }
+            std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_secs(8));
+                for (what, url, h) in probes {
+                    match yt_native::probe::throughput(&url, &h, 4 * 1_048_576) {
+                        Ok((n, mbs)) => crate::log::log(format!("yt: débit googlevideo {what} : {mbs:.2} Mo/s ({} Ko reçus)", n / 1024)),
+                        Err(e) => crate::log::log(format!("yt: débit googlevideo {what} : échec {e}")),
+                    }
+                }
+            });
+        }
         // Pré-roll publicitaire imposé côté serveur : googlevideo répond 403 avant `available_at`.
         let until = [audio.available_at, video.and_then(|v| v.available_at)].into_iter().flatten().fold(0.0f64, f64::max);
         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0);
@@ -196,12 +217,17 @@ fn yt_play_blocking(app: AppHandle, input: String, start: f64, max_height: u32, 
                 let app = app.clone();
                 Arc::new(move |ev| match ev {
                     PlaybackEvent::Audio(AudioEvent::Opened { source, device, bit_perfect, rate_switched, .. }) => {
+                        crate::log::log(format!(
+                            "moteur: source {} Hz {} canaux -> DAC {} Hz {:?} (bit-perfect={bit_perfect}, fréquence changée={rate_switched})",
+                            source.rate, source.channels, device.rate, device.kind
+                        ));
                         let _ = app.emit(EV_AUDIO, AudioBadge::engine(source, device, bit_perfect, rate_switched));
                     }
                     PlaybackEvent::Audio(AudioEvent::Ended) => {
                         let _ = app.emit(EV_NOTICE, Notice { kind: "ended", text: "Lecture terminée".into(), from: None, to: None });
                     }
                     PlaybackEvent::Audio(AudioEvent::Error(e)) => {
+                        crate::log::log(format!("moteur: ERREUR {e}"));
                         let _ = app.emit(EV_ERROR, e);
                     }
                     PlaybackEvent::Skipped { category, from, to } => {
@@ -453,7 +479,7 @@ fn spawn_mpv_audio_probe(app: AppHandle, gen: u64) {
             }
             if src != rate {
                 crate::log::log(format!("mpv: aucun format n'offre {src} Hz sur ce DAC ; retour au choix de mpv"));
-                v.retry_audio_format("no");
+                v.retry_audio_format("float");
                 tokio::time::sleep(Duration::from_millis(700)).await;
                 if let Some((r, f)) = v.audio_out() {
                     let _ = app.emit(EV_AUDIO, AudioBadge::mpv(src, r, &f));

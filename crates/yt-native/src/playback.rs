@@ -16,6 +16,10 @@ pub trait VideoControl: Send + Sync {
     fn set_speed(&self, speed: f64);
     fn seek_abs(&self, secs: f64);
     fn set_pause(&self, paused: bool);
+    /// Vidéo en cours de seek ou en attente de données : sa position n'est pas fiable.
+    fn stalled(&self) -> bool {
+        false
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -151,6 +155,11 @@ fn sync_loop(
     let servo = Servo::default();
     let mut started = false;
     let mut last_speed = 1.0f64;
+    // Un seek exact en 1080p prend ~0,3–0,6 s : on vise devant l'audio de ce délai (moyenne mesurée)
+    // et on espace les seeks, sinon la vidéo court sans fin derrière une cible déjà dépassée.
+    let mut seek_lead = 0.4f64;
+    let mut pending_seek: Option<(Instant, f64)> = None;
+    let mut last_hard = Instant::now() - Duration::from_secs(10);
     while !stop.load(Ordering::Relaxed) {
         thread::sleep(Duration::from_millis(100));
         let a = shared.presented_secs();
@@ -180,8 +189,24 @@ fn sync_loop(
         if (t0.elapsed().as_millis() as u64) < holdoff.load(Ordering::Relaxed) {
             continue;
         }
+        if video.stalled() {
+            continue;
+        }
+        if let Some((t, _)) = pending_seek.take() {
+            // Seek terminé : mise à jour du délai mesuré, puis 1 s de stabilisation.
+            seek_lead = (0.7 * seek_lead + 0.3 * t.elapsed().as_secs_f64()).clamp(0.1, 2.0);
+            holdoff.store(t0.elapsed().as_millis() as u64 + 1000, Ordering::Relaxed);
+            continue;
+        }
         if let Some(v) = video.time_pos() {
-            match servo.step(v, a) {
+            let action = match servo.step(v, a) {
+                ServoAction::HardSeek(_) if last_hard.elapsed() < Duration::from_secs(3) => {
+                    // Trop tôt pour un nouveau seek : rattrapage par la vitesse, au maximum.
+                    ServoAction::Speed(if v > a { 1.0 - servo.max_adjust } else { 1.0 + servo.max_adjust })
+                }
+                other => other,
+            };
+            match action {
                 ServoAction::Speed(s) => {
                     if (s - last_speed).abs() > 0.002 {
                         video.set_speed(s);
@@ -190,10 +215,12 @@ fn sync_loop(
                 }
                 ServoAction::HardSeek(t) => {
                     sink(PlaybackEvent::VideoResync { drift: v - a });
-                    video.seek_abs(t);
+                    video.seek_abs(t + seek_lead);
                     video.set_speed(1.0);
                     last_speed = 1.0;
-                    holdoff.store(t0.elapsed().as_millis() as u64 + 500, Ordering::Relaxed);
+                    last_hard = Instant::now();
+                    pending_seek = Some((Instant::now(), t));
+                    holdoff.store(t0.elapsed().as_millis() as u64 + 150, Ordering::Relaxed);
                 }
             }
         }
